@@ -242,6 +242,10 @@ class GPUArray:
             # bombs if s is a Python integer
             s = s.item()
 
+        # Make sure shape is made of int and not e.g. np.int32 as these can overflow
+        # e.g. in __getitem__() when adding the new_offset...
+        shape = tuple(int(v) for v in shape)
+
         if strides is None:
             if order == "F":
                 strides = _f_contiguous_strides(dtype.itemsize, shape)
@@ -255,7 +259,9 @@ class GPUArray:
 
             strides = tuple(strides)
 
-        self.shape = tuple(shape)
+        strides = tuple(int(v) for v in strides)
+
+        self.shape = shape
         self.dtype = dtype
         self.strides = strides
         self.mem_size = self.size = s
@@ -574,10 +580,10 @@ class GPUArray:
         )
 
     # operators ---------------------------------------------------------------
-    def mul_add(self, selffac, other, otherfac, add_timer=None, stream=None):
+    def mul_add(self, selffac, other, otherfac, add_timer=None, stream=None, out=None):
         """Return `selffac * self + otherfac*other`."""
-        result = self._new_like_me(_get_common_dtype(self, other))
-        return self._axpbyz(selffac, other, otherfac, result, add_timer)
+        result = out if out is not None else self._new_like_me(_get_common_dtype(self, other))
+        return self._axpbyz(selffac, other, otherfac, result, add_timer, stream=stream)
 
     def __add__(self, other):
         """Add an array with an array or an array with a scalar."""
@@ -1883,7 +1889,7 @@ def concatenate(arrays, axis=0, allocator=None):
     # }}}
 
     shape = tuple(shape)
-    dtype = np.find_common_type([ary.dtype for ary in arrays], [])
+    dtype = np.result_type(*(ary.dtype for ary in arrays))
     result = empty(shape, dtype, allocator=allocator)
 
     full_slice = (slice(None),) * len(shape)
@@ -2087,7 +2093,7 @@ def subset_sum(subset, a, dtype=None, stream=None, allocator=None):
     from pycuda.reduction import get_subset_sum_kernel
 
     krnl = get_subset_sum_kernel(dtype, subset.dtype, a.dtype)
-    return krnl(subset, a, stream=stream)
+    return krnl(subset, a, stream=stream, allocator=allocator)
 
 
 def dot(a, b, dtype=None, stream=None, allocator=None):
